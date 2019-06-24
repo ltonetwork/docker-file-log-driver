@@ -25,12 +25,12 @@ type Driver struct {
 }
 
 type logPair struct {
-	active  bool
-	file    string
-	info    logger.Info
-	logLine jsonLogLine
-	stream  io.ReadCloser
-    logger  *logrus.Logger
+	active    bool
+	file      string
+	info      logger.Info
+	logLine   jsonLogLine
+	stream    io.ReadCloser
+	logger    *logrus.Logger
 }
 
 func NewDriver() *Driver {
@@ -115,10 +115,12 @@ func shutdownLogPair(lp *logPair) {
 
 func consumeLog(lp *logPair) {
 	var buf logdriver.LogEntry
-
+  
 	dec := protoio.NewUint32DelimitedReader(lp.stream, binary.BigEndian, 1e6)
 	defer dec.Close()
 	defer shutdownLogPair(lp)
+
+  previous := ""
 
 	for {
 		if !lp.active {
@@ -138,7 +140,7 @@ func consumeLog(lp *logPair) {
 			}
 		}
 
-		err = logMessage(lp, buf.Line)
+		err, previous = logMessage(lp, buf.Line, previous)
 		if err != nil {
 			logrus.WithField("id", lp.info.ContainerID).WithError(err).Warn("error logging message, dropping it and continuing")
 		}
