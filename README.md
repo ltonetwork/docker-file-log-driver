@@ -1,19 +1,19 @@
-# docker-file-log-driver
+# LTO docker-file-log-driver
 
-File log driver for Docker that sends all of the containers output to a specified File. The code is inspired by https://github.com/pressrelations/docker-redis-log-driver.
+File log driver for Docker that sends all of the containers output to a specified file. The driver creates a hash chain which can optionally be anchored on a public blockchain to make it tamper resistant.
 
 ## Background
 
-We use File as a reliable and simple storage for logs, Running docker containers stores logs in files with container id file name which is hard to locate because are stored in: 
+We use a file as a reliable and simple storage for logs, Running docker containers stores logs in files with container id file name which is hard to locate because are stored in: 
 ```
 /var/lib/docker/containers/<container id>/<container id>-json.log
 ```
 
-The excellent [Logagg](https://github.com/deep-compute/logagg) is highly recommended to pick up the logs and transport them to whatever datbase you like.
+This file may also be used as audit log. To prevent tampering of the log file, a hash is created for each entry using the log data and the hash of the previous entry, creating a [hash chain](https://en.wikipedia.org/wiki/Hash_chain). Hashes can subsequenty be written to a blockchain like [LTO Network](https://lto.network).
 
 ## Features
 
-* Send containers stdout/stderr to a File.
+* Send containers stdout/stderr to a file.
 * Integrates seamlessly with orchestration platforms like Kubernetes, Mesos/Marathon or Docker Swarm
 
 * Output format of logs (dictionary)
@@ -32,9 +32,10 @@ The excellent [Logagg](https://github.com/deep-compute/logagg) is highly recomme
     * Raw log line produced by child process (`message`)
   * Time of log in docker contrainer (`time`)
 
-
 * `message` payload may be arbitrarily complex (e.g. JSON encoded)
 * You can also configure logging setup either globally through Docker `config.json` or per container (`--log-opt` style)
+* Create a SHA256 hash for each entry, adding the hash of the previous entry to create a hash chain
+  * Anchor once per X entries, configurable via `--log-opt achor_interval=`
 
 ## Requirements
 
@@ -66,16 +67,16 @@ The excellent [Logagg](https://github.com/deep-compute/logagg) is highly recomme
 ## Install
 
 ```
-$ docker plugin install deepcompute/docker-file-log-driver:1.0 --alias file-log-driver
-Plugin "deepcompute/docker-file-log-driver:1.0" is requesting the following privileges:
+$ docker plugin install legalthings/docker-file-log-driver:1.0 --alias file-log-driver
+Plugin "legalthings/docker-file-log-driver:1.0" is requesting the following privileges:
  - network: [host]
  - mount: [/var/log]
 Do you grant the above permissions? [y/N] y
-1.0: Pulling from deepcompute/docker-file-log-driver
+1.0: Pulling from legalthings/docker-file-log-driver
 a019fc3de34c: Download complete 
 Digest: sha256:5b785ded313acd0881c589c5f588f19b3ec3b5300230684a5a7ab1ed1c65e400
-Status: Downloaded newer image for deepcompute/docker-file-log-driver:1.0
-Installed plugin deepcompute/docker-file-log-driver:1.0
+Status: Downloaded newer image for legalthings/docker-file-log-driver:1.0
+Installed plugin legalthings/docker-file-log-driver:1.0
 ```
 ## Check
 ```
@@ -163,6 +164,8 @@ All available options are documented here and can be set via `--log-opt KEY=VALU
 |`max-size`|10|size in mb of each log file|
 |`max-backups`|10|number of log file backups after `max-size` is reched|
 |`max-age`|100|number of days log files are kept in the file system before dleting|
+|`anchor-endpoint`|_none_|URL of the LTO anchoring node HTTP API endpoint|
+|`anchor-interval`|1000|Write the hash once per X entries to the public blockchain|
 
 ## Uninstall
 
@@ -178,7 +181,7 @@ $ docker plugin rm file-log-driver
 You're more than welcome to hack on this.:-)
 
 ```
-$ git clone https://github.com/deep-compute/docker-file-log-driver
+$ git clone https://github.com/ltonetwork/docker-file-log-driver
 $ cd docker-file-log-driver
 $ docker build -t docker-file-log-driver .
 $ ID=$(docker create docker-file-log-driver true)
@@ -187,4 +190,3 @@ $ docker export $ID | tar -x -C rootfs/
 $ docker plugin create file-log-driver .
 $ docker plugin enable file-log-driver
 ```
-
