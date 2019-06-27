@@ -160,11 +160,12 @@ All available options are documented here and can be set via `--log-opt KEY=VALU
 
 |Key|Default|Description|
 |---|---|---|
-|`fpath`|/var/log/docker/docker_file_log_driver_default.log|File path of the log file inside /var/log|
+|`path`|/var/log/docker/default.log|File path of the log file|
 |`max-size`|10|size in mb of each log file|
-|`max-backups`|10|number of log file backups after `max-size` is reched|
-|`max-age`|100|number of days log files are kept in the file system before dleting|
-|`anchor-endpoint`|_none_|URL of the LTO anchoring node HTTP API endpoint|
+|`max-backups`|10|number of log file backups after `max-size` is reached|
+|`max-age`|100|number of days log files are kept in the file system before deleting|
+|`anchor-url`|_none_|URL of the LTO anchoring node HTTP API endpoint|
+|`anchor-apikey`| |API key of the LTO anchoring node|
 |`anchor-interval`|1000|Write the hash once per X entries to the public blockchain|
 
 ## Uninstall

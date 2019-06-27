@@ -13,15 +13,6 @@ func parseDuration(d string) time.Duration {
 	return duration
 }
 
-func parseFpath(v string, _default string) string {
-	_v := ("/var/log" + v)
-	if _v != "" {
-		return (_v)
-	} else {
-		return _default
-	}
-}
-
 func parseInt(v string, _default int) int {
     _v, err := strconv.ParseInt(v, 10, 0);
     if err == nil {

@@ -9,13 +9,13 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/sirupsen/logrus"
-    "github.com/snowzach/rotatefilehook"
 	"github.com/docker/docker/api/types/plugins/logdriver"
-	"github.com/docker/docker/daemon/logger"
+	dlogger "github.com/docker/docker/daemon/logger"
 	"github.com/docker/docker/daemon/logger/loggerutils"
 	protoio "github.com/gogo/protobuf/io"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
+	"github.com/snowzach/rotatefilehook"
 	"github.com/tonistiigi/fifo"
 )
 
@@ -25,12 +25,14 @@ type Driver struct {
 }
 
 type logPair struct {
-	active    bool
-	file      string
-	info      logger.Info
-	logLine   jsonLogLine
-	stream    io.ReadCloser
-	logger    *logrus.Logger
+	active     bool
+	file       string
+	info       dlogger.Info
+	logLine    jsonLogLine
+	stream     io.ReadCloser
+	logger     *logrus.Logger
+	anchor     *Anchor
+	latestHash string
 }
 
 func NewDriver() *Driver {
@@ -39,7 +41,7 @@ func NewDriver() *Driver {
 	}
 }
 
-func (d *Driver) StartLogging(file string, logCtx logger.Info) error {
+func (d *Driver) StartLogging(file string, logCtx dlogger.Info) error {
 	d.mu.Lock()
 	if _, exists := d.logs[path.Base(file)]; exists {
 		d.mu.Unlock()
@@ -58,10 +60,10 @@ func (d *Driver) StartLogging(file string, logCtx logger.Info) error {
 		return err
 	}
 
-	extra, err := logCtx.ExtraAttributes(nil)
-	if err != nil {
-		return err
-	}
+//	extra, err := logCtx.ExtraAttributes(nil)
+//	if err != nil {
+//		return err
+//	}
 
 	hostname, err := logCtx.Hostname()
 	if err != nil {
@@ -75,13 +77,15 @@ func (d *Driver) StartLogging(file string, logCtx logger.Info) error {
 		ImageId:          logCtx.ImageFullID(),
 		ImageName:        logCtx.ImageName(),
 		Command:          logCtx.Command(),
+		Level:            "info",
 		Tag:              tag,
-		Extra:            extra,
+//		Extra:            extra,
 		Host:             hostname,
 	}
 
-    logger := buildLogger(&logCtx)
-	lp := &logPair{true, file, logCtx, logLine, stream, logger}
+	logger := buildLogger(&logCtx)
+	anchor := buildAnchor(&logCtx)
+	lp := &logPair{true, file, logCtx, logLine, stream, logger, anchor, ""}
 
 	d.mu.Lock()
 	d.logs[path.Base(file)] = lp
@@ -115,12 +119,12 @@ func shutdownLogPair(lp *logPair) {
 
 func consumeLog(lp *logPair) {
 	var buf logdriver.LogEntry
-  
+
 	dec := protoio.NewUint32DelimitedReader(lp.stream, binary.BigEndian, 1e6)
 	defer dec.Close()
 	defer shutdownLogPair(lp)
 
-  previous := ""
+	count := 0
 
 	for {
 		if !lp.active {
@@ -140,39 +144,61 @@ func consumeLog(lp *logPair) {
 			}
 		}
 
-		err, previous = logMessage(lp, buf.Line, previous)
+		err = logMessage(lp, buf.Line)
 		if err != nil {
 			logrus.WithField("id", lp.info.ContainerID).WithError(err).Warn("error logging message, dropping it and continuing")
 		}
 
+		if lp.anchor != nil && (count % lp.anchor.interval) == 0 {
+			err = lp.anchor.post(lp.latestHash)
+			if err == nil {
+				lp.logger.WithField("id", lp.info.ContainerID).Debugf("successfully anchored '%s'", lp.latestHash)
+			} else {
+				lp.logger.WithField("id", lp.info.ContainerID).WithError(err).Warnf("anchoring '%s' failed", lp.latestHash)
+			}
+		}
+
 		buf.Reset()
+		count++
 	}
 }
 
-func buildLogger(logCtx *logger.Info) *logrus.Logger {
-    P := parseInt
+func buildLogger(logCtx *dlogger.Info) *logrus.Logger {
+	P := parseInt
 
-    fpath := parseFpath(readWithDefault(logCtx.Config, "fpath", ""), "/var/log/docker/docker_file_log_driver_default.log")
-    max_size := P(readWithDefault(logCtx.Config, "max-size", ""), 10)
-    max_backups := P(readWithDefault(logCtx.Config, "max-backups", ""), 10)
-    max_age := P(readWithDefault(logCtx.Config, "max-age", ""), 100)
+	filePath := readWithDefault(logCtx.Config, "path", "/var/log/docker/default.log")
+	maxSize := P(readWithDefault(logCtx.Config, "max-size", ""), 10)
+	maxBackups := P(readWithDefault(logCtx.Config, "max-backups", ""), 10)
+	maxAge := P(readWithDefault(logCtx.Config, "max-age", ""), 100)
 
-    hook, err := rotatefilehook.NewRotateFileHook(rotatefilehook.RotateFileConfig{
-        Filename: fpath,
-        MaxSize: max_size,
-        MaxBackups: max_backups,
-        MaxAge: max_age,
-        Level: logrus.DebugLevel,
-        Formatter: new(logrus.JSONFormatter),
-    })
+	hook, err := rotatefilehook.NewRotateFileHook(rotatefilehook.RotateFileConfig{
+		Filename: filePath,
+		MaxSize: maxSize,
+		MaxBackups: maxBackups,
+		MaxAge: maxAge,
+		Level: logrus.DebugLevel,
+		Formatter: new(logrus.JSONFormatter),
+	})
 
-    if err != nil {
-        // FIXME: ?
-        panic(err);
-    }
+	if err != nil {
+		// FIXME: ?
+		panic(err);
+	}
 
-    logger := logrus.New()
-    logger.AddHook(hook)
+	logger := logrus.New()
+	logger.AddHook(hook)
 
 	return logger
+}
+
+func buildAnchor(logCtx *dlogger.Info) *Anchor {
+	url := readWithDefault(logCtx.Config, "anchor-url", "")
+	if url == "" {
+		return nil
+	}
+
+	apiKey := readWithDefault(logCtx.Config, "anchor-apikey", "")
+	interval := parseInt(readWithDefault(logCtx.Config, "anchor-interval", ""), 1000)
+
+	return &Anchor{url, apiKey, interval}
 }

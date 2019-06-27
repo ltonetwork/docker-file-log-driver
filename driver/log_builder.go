@@ -1,12 +1,12 @@
 package driver
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"time"
-  "crypto/sha256"
-  "encoding/hex"
 	"github.com/sirupsen/logrus"
+	"time"
 )
 
 type jsonTime struct {
@@ -14,40 +14,51 @@ type jsonTime struct {
 }
 
 type jsonLogLine struct {
-	Message          string            `json:"message"`
+	Command          string            `json:"command"`
+	ContainerCreated jsonTime          `json:"container_created"`
 	ContainerId      string            `json:"container_id"`
 	ContainerName    string            `json:"container_name"`
-	ContainerCreated jsonTime          `json:"container_created"`
+//	Extra            map[string]string `json:"extra"`
+	Host             string            `json:"host"`
 	ImageId          string            `json:"image_id"`
 	ImageName        string            `json:"image_name"`
-	Command          string            `json:"command"`
+	Level            string            `json:"level"`
+	Message          string            `json:"msg"`
 	Tag              string            `json:"tag"`
-	Extra            map[string]string `json:"extra"`
-	Host             string            `json:"host"`
-	Timestamp        jsonTime          `json:"timestamp"`
+	Timestamp        jsonTime          `json:"time"`
 }
 
-func logMessage(lp *logPair, message []byte, previousHash string) (error, string) {
+func logMessage(lp *logPair, message []byte) error {
 	lp.logLine.Message = string(message[:])
 	lp.logLine.Timestamp = jsonTime{time.Now()}
 
 	bytes, err := json.Marshal(lp.logLine)
 	if err != nil {
-		return err, ""
+		return err
 	}
 
-	hashBytes := sha256.Sum256(append([]byte(previousHash), bytes...))
-  hash := hex.EncodeToString(hashBytes[:])
+	hashBytes := sha256.Sum256(append([]byte(lp.latestHash), bytes...))
+	hash := hex.EncodeToString(hashBytes[:])
 
 	lp.logger.WithFields(logrus.Fields{
-    "hash": hash,
-  }).Info(string(bytes))
+		"command": lp.logLine.Command,
+		"container_created": lp.logLine.ContainerCreated.Time.Format(time.RFC3339),
+		"container_id": lp.logLine.ContainerId,
+		"container_name": lp.logLine.ContainerName,
+//		"extra": string(extraBytes),
+		"hash": hash,
+		"host": lp.logLine.Host,
+		"image_id": lp.logLine.ImageId,
+		"image_name": lp.logLine.ImageName,
+		"tag": lp.logLine.Tag,
+		"zzz": string(bytes),
+	}).WithTime(lp.logLine.Timestamp.Time).Info(string(lp.logLine.Message))
 
-	return nil, hash;
+	lp.latestHash = hash;
+	return nil;
 }
 
 func (t jsonTime) MarshalJSON() ([]byte, error) {
-	str := fmt.Sprintf("\"%s\"", t.Format(time.RFC3339Nano))
+	str := fmt.Sprintf("\"%s\"", t.Format(time.RFC3339))
 	return []byte(str), nil
 }
-
