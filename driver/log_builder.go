@@ -51,7 +51,6 @@ func logMessage(lp *logPair, message []byte) error {
 		"image_id": lp.logLine.ImageId,
 		"image_name": lp.logLine.ImageName,
 		"tag": lp.logLine.Tag,
-		"zzz": string(bytes),
 	}).WithTime(lp.logLine.Timestamp.Time).Info(string(lp.logLine.Message))
 
 	lp.latestHash = hash;
